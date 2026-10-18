@@ -1,0 +1,50 @@
+---
+- name: Configure and verify AWS EC2 server
+  hosts: webservers
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Display operating system
+      ansible.builtin.debug:
+        msg: "{{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}"
+
+    - name: Check Docker service
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - is-active
+          - docker
+      register: docker_service
+      changed_when: false
+
+    - name: Display Docker service status
+      ansible.builtin.debug:
+        msg: "Docker service: {{ docker_service.stdout }}"
+
+    - name: Check Docker Compose version
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - version
+      register: compose_version
+      changed_when: false
+
+    - name: Display Docker Compose version
+      ansible.builtin.debug:
+        msg: "{{ compose_version.stdout }}"
+
+    - name: List running containers
+      ansible.builtin.command:
+        argv:
+          - docker
+          - ps
+          - --format
+          - "{{ '{{' }}.Names{{ '}}' }}: {{ '{{' }}.Status{{ '}}' }}"
+      register: running_containers
+      changed_when: false
+
+    - name: Display running containers
+      ansible.builtin.debug:
+        var: running_containers.stdout_lines

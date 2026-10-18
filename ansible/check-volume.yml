@@ -1,0 +1,19 @@
+---
+- name: Verify MongoDB volume mount
+  hosts: webservers
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Inspect MongoDB mounts
+      ansible.builtin.command:
+        argv:
+          - docker
+          - inspect
+          - todo-mongodb
+      register: mongo_inspect
+      changed_when: false
+
+    - name: Show mounted volumes
+      ansible.builtin.debug:
+        msg: "{{ (mongo_inspect.stdout | from_json)[0].Mounts | map(attribute='Name') | zip((mongo_inspect.stdout | from_json)[0].Mounts | map(attribute='Destination')) | list }}"

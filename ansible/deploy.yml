@@ -1,0 +1,173 @@
+---
+- name: Safely deploy Todo API with Docker Compose
+  hosts: webservers
+  become: true
+  gather_facts: true
+
+  vars:
+    app_dir: /opt/multi-container-service
+    compose_file: /opt/multi-container-service/compose.yaml
+    mongo_volume_name: multi-container-service_mongo_data
+
+  tasks:
+    - name: Ensure application directory exists
+      ansible.builtin.file:
+        path: "{{ app_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Check existing Compose configuration
+      ansible.builtin.stat:
+        path: "{{ compose_file }}"
+      register: existing_compose
+
+    - name: Back up existing Compose configuration
+      ansible.builtin.copy:
+        src: "{{ compose_file }}"
+        dest: "{{ compose_file }}.bak"
+        remote_src: true
+        force: false
+        owner: root
+        group: root
+        mode: "0644"
+      when: existing_compose.stat.exists
+
+    - name: Deploy Compose configuration
+      ansible.builtin.copy:
+        dest: "{{ compose_file }}"
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          services:
+            api:
+              image: untarasaputra/multi-container-service:1.0
+              container_name: todo-api
+              restart: unless-stopped
+              ports:
+                - "3002:3000"
+              environment:
+                PORT: "3000"
+                MONGO_URI: mongodb://mongodb:27017/tododb
+              depends_on:
+                mongodb:
+                  condition: service_healthy
+              mem_limit: 256m
+
+            mongodb:
+              image: mongo:7
+              container_name: todo-mongodb
+              restart: unless-stopped
+              volumes:
+                - mongo_data:/data/db
+              healthcheck:
+                test:
+                  - CMD
+                  - mongosh
+                  - --quiet
+                  - --eval
+                  - db.adminCommand('ping').ok
+                interval: 10s
+                timeout: 5s
+                retries: 5
+                start_period: 15s
+              mem_limit: 384m
+
+          volumes:
+            mongo_data:
+              name: multi-container-service_mongo_data
+
+    - name: Validate Compose configuration
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - -f
+          - "{{ compose_file }}"
+          - config
+          - -q
+      changed_when: false
+
+    - name: Verify the expected MongoDB volume exists
+      ansible.builtin.command:
+        argv:
+          - docker
+          - volume
+          - inspect
+          - "{{ mongo_volume_name }}"
+      changed_when: false
+
+    - name: Pull Compose images
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - -f
+          - "{{ compose_file }}"
+          - pull
+      register: pull_result
+      changed_when: false
+
+    - name: Apply Compose configuration
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - -f
+          - "{{ compose_file }}"
+          - up
+          - -d
+      register: compose_result
+      changed_when: >-
+        'Recreated' in compose_result.stdout or
+        'Started' in compose_result.stdout or
+        'Created' in compose_result.stdout
+
+    - name: Wait for Todo API to respond
+      ansible.builtin.uri:
+        url: http://127.0.0.1:3002/todos
+        method: GET
+        status_code: 200
+        return_content: true
+      register: api_health
+      retries: 12
+      delay: 5
+      until: api_health.status == 200
+
+    - name: Verify MongoDB container is healthy
+      ansible.builtin.command:
+        argv:
+          - docker
+          - inspect
+          - --format
+          - "{% raw %}{{.State.Health.Status}}{% endraw %}"
+          - todo-mongodb
+      register: mongo_health
+      changed_when: false
+      retries: 12
+      delay: 5
+      until: mongo_health.stdout == "healthy"
+
+    - name: Verify MongoDB data volume mount
+      ansible.builtin.command:
+        argv:
+          - docker
+          - inspect
+          - todo-mongodb
+      register: mongo_inspect
+      changed_when: false
+      failed_when: >-
+        (mongo_inspect.stdout | from_json)[0].Mounts
+        | selectattr('Destination', 'equalto', '/data/db')
+        | selectattr('Name', 'equalto', mongo_volume_name)
+        | list
+        | length != 1
+
+    - name: Show deployment result
+      ansible.builtin.debug:
+        msg:
+          - "Todo API: HTTP {{ api_health.status }}"
+          - "MongoDB health: {{ mongo_health.stdout }}"
+          - "MongoDB data volume: {{ mongo_volume_name }}"
