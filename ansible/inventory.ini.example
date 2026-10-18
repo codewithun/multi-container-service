@@ -1,0 +1,2 @@
+[webservers]
+aws-ec2 ansible_host=YOUR_EC2_PUBLIC_IP ansible_user=ubuntu ansible_ssh_private_key_file=YOUR_SSH_PRIVATE_KEY_PATH ansible_ssh_common_args='-o IdentitiesOnly=yes'
