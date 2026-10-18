@@ -72,7 +72,7 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            untaraekasaputra/multi-container-service:latest
-            untaraekasaputra/multi-container-service:${{ github.sha }}
+            untarasaputra/multi-container-service:latest
+            untarasaputra/multi-container-service:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
